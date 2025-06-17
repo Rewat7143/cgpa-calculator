@@ -263,7 +263,7 @@ def render_add_semester_form():
         form_title = f"Add Data for {current_semester_label}"
         button_label = "Add Semester Data"
 
-    st.markdown(f"### {form_title}")
+    st.markdown(f"#### {form_title}")
     with st.form(key='semester_form', clear_on_submit=(st.session_state.editing_semester_index is None)):
         col1, col2 = st.columns([0.4, 0.6]) # Adjust column width for better spacing
         
@@ -319,62 +319,73 @@ def render_semester_table_and_actions():
     st.markdown("### Your Semesters")
 
     if st.session_state.semesters:
-        # Define column widths for the manual table layout
-        # Wider columns for Semester, SGPA, Credits, then narrower for buttons
-        col_widths = [0.3, 0.2, 0.15, 0.1, 0.1] 
+        df = pd.DataFrame(st.session_state.semesters)
 
-        # Header Row
-        header_cols = st.columns(col_widths)
-        with header_cols[0]:
-            st.markdown("**Semester**")
-        with header_cols[1]:
-            st.markdown("**SGPA**")
-        with header_cols[2]:
-            st.markdown("**Credits**")
-        with header_cols[3]:
-            st.markdown(" ") # Placeholder for Edit button header
-        with header_cols[4]:
-            st.markdown(" ") # Placeholder for Remove button header
-        st.markdown("--- ") # Separator below header
+        # Ensure correct column order and types for display and editing
+        df['SGPA (Si)'] = pd.to_numeric(df['SGPA (Si)'], errors='coerce')
+        df['Credits (Ci)'] = pd.to_numeric(df['Credits (Ci)'], errors='coerce')
 
-        # Data Rows with Buttons
-        for i, semester in enumerate(st.session_state.semesters):
-            # Ensure values are float for calculation and handle potential NaN for display
-            sgpa_val = semester.get('SGPA (Si)')
-            credits_val = semester.get('Credits (Ci)')
+        # Add a column for selection for deletion
+        df['Select to Delete'] = False # Initialize with False
 
-            # Format values for display, handling NaN gracefully
-            display_sgpa = f"{sgpa_val:.2f}" if pd.notna(sgpa_val) else "N/A"
-            display_credits = f"{credits_val:.1f}" if pd.notna(credits_val) else "N/A"
+        edited_df = st.data_editor(
+            df, # Use the DataFrame with the new 'Select to Delete' column
+            column_config={
+                "Semester": st.column_config.Column(
+                    "Semester",
+                    help="The academic semester",
+                    disabled=True,
+                ),
+                "SGPA (Si)": st.column_config.NumberColumn(
+                    "SGPA (Si)",
+                    help=f"SGPA for the semester ({SGPA_MIN:.1f} - {SGPA_MAX:.1f})",
+                    min_value=SGPA_MIN,
+                    max_value=SGPA_MAX,
+                    format="%.2f",
+                ),
+                "Credits (Ci)": st.column_config.NumberColumn(
+                    "Credits (Ci)",
+                    help="Credits for the semester (must be > 0)",
+                    min_value=CREDITS_MIN_DISPLAY,
+                    max_value=50.0,
+                    format="%.1f",
+                ),
+                "Select to Delete": st.column_config.CheckboxColumn(
+                    "Delete", # Display name for the checkbox column
+                    help="Select semesters to delete",
+                    default=False, # Default state of checkboxes
+                ),
+            },
+            hide_index=True,
+            num_rows="fixed", # Prevent users from adding/deleting rows directly via data editor UI
+            key="semester_data_editor_table",
+        )
 
-            row_cols = st.columns(col_widths)
-            with row_cols[0]:
-                st.markdown(f"**{semester['Semester']}**")
-            with row_cols[1]:
-                st.markdown(f"{display_sgpa}")
-            with row_cols[2]:
-                st.markdown(f"{display_credits}")
-            with row_cols[3]:
-                st.button(
-                    "✏️",
-                    key=f"edit_btn_{i}",
-                    on_click=edit_semester, args=(i,),
-                    help=f"Edit data for {semester['Semester']}"
-                )
-            with row_cols[4]:
-                st.button(
-                    "🗑️",
-                    key=f"delete_btn_{i}",
-                    on_click=delete_semester, args=(i,),
-                    type="secondary",
-                    help=f"Remove {semester['Semester']}"
-                )
-            # Add a subtle separator between rows for visual clarity
-            if i < len(st.session_state.semesters) - 1:
-                st.markdown("--- ") # Use a subtle line between entries
+        # Update session state with the edited DataFrame
+        # This handles value changes by the user directly in the table, including checkbox selection
+        st.session_state.semesters = edited_df[['Semester', 'SGPA (Si)', 'Credits (Ci)']].to_dict(orient='records')
+
+        # Extract selected indices for deletion
+        selected_indices_to_delete = edited_df[edited_df['Select to Delete'] == True].index.tolist()
+
+        # Clean data from potential NaN values that data_editor might introduce if user clears fields
+        for sem_data in st.session_state.semesters:
+            if pd.isna(sem_data.get('SGPA (Si)')):
+                sem_data['SGPA (Si)'] = SGPA_MIN # Default to min SGPA
+            if pd.isna(sem_data.get('Credits (Ci)')):
+                sem_data['Credits (Ci)'] = CREDITS_MIN_DISPLAY # Default to min Credits
+
+        st.write("") # Spacing
+        # Moved the delete button outside the for loop that iterates through semesters.
+        # This button will now delete all selected rows from the data_editor.
+        if st.button("🗑️ Delete Selected Semesters", disabled=not selected_indices_to_delete):
+            # Delete in reverse order to avoid index issues when deleting multiple rows
+            for index in sorted(selected_indices_to_delete, reverse=True):
+                delete_semester(index) # Call existing delete function
+            st.rerun() # Rerun to update the table after deletion
 
     else:
-        st.info("No semester data entered yet.")
+        st.info("No semester data entered yet. Click 'Add Semester Data' above to begin.")
 
 def render_cgpa_display():
     """
@@ -421,7 +432,7 @@ def app():
 
     render_sidebar()
 
-    st.title("Flexible CGPA Calculator :mortar_board:")
+    st.title(" CGPA Calculator :mortar_board:")
 
     render_add_semester_form()
     st.write("---") # Separator
